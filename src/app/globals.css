@@ -24,3 +24,15 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@font-face {
+  font-family: 'Press Gothic';
+  src: url('/fonts/pressgothic.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+body {
+  font-family: 'Press Gothic', sans-serif;
+}
+
