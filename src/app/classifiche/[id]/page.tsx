@@ -37,9 +37,7 @@ export default function Page() {
   const [showFinal, setShowFinal] = useState(false);
   const [isDark, setIsDark] = useState(true);
   const [roomId, setRoomId] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const [username, setUsername] = useState('');
-
+  const [username, setUsername] = useState('');
   const [participants, setParticipants] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -197,6 +195,7 @@ const [username, setUsername] = useState('');
                     className="w-full mt-1 px-2 py-1 rounded text-xs bg-gray-100 text-black"
                   />
                 </p>
+                <p className="text-sm mb-2">👤 Tu sei: {username}</p>
                 <p className="mb-1 text-sm">👥 Partecipanti:</p>
                 <ul className="list-disc ml-5 text-sm">
                   {participants.map((user, i) => (
