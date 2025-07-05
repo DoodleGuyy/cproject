@@ -37,7 +37,9 @@ export default function Page() {
   const [showFinal, setShowFinal] = useState(false);
   const [isDark, setIsDark] = useState(true);
   const [roomId, setRoomId] = useState<string | null>(null);
-  const [username, setUsername] = useState('');
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+const [username, setUsername] = useState('');
+
   const [participants, setParticipants] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
 
