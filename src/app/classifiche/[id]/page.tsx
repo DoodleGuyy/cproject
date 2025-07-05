@@ -154,7 +154,7 @@ export default function Page() {
   }, [finalWinner]);
 
   const inviteLink =
-    typeof window !== 'undefined' && roomId ? `${window.location.origin}/classifica/${id}?room=${roomId}` : '';
+    typeof window !== 'undefined' && roomId ? `${window.location.origin}/classifiche/${id}?room=${roomId}` : '';
 
   return (
     <div style={{ zoom: 1.5 }}>
