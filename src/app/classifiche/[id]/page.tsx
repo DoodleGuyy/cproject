@@ -12,6 +12,7 @@ import {
   arrayUnion,
   arrayRemove,
   onSnapshot,
+  deleteDoc,
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { db, auth } from '@/lib/firebaseConfig';
@@ -115,14 +116,48 @@ export default function Page() {
 
           setRoomId(roomFromUrl);
 
-          window.addEventListener('beforeunload', () => {
-            updateDoc(roomDocRef, {
-              partecipanti: arrayRemove(name),
-            });
-          });
+          const removeFromRoom = () => {
+  if (roomDocRef) {
+    updateDoc(roomDocRef, {
+      partecipanti: arrayRemove(name),
+    }).catch((err) => console.error('Errore rimozione partecipante:', err));
+  }
+};
 
-          onSnapshot(roomDocRef, (docSnap) => {
+window.addEventListener('beforeunload', removeFromRoom);
+window.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    removeFromRoom();
+  }
+});
+
+
+          onSnapshot(roomDocRef, async (docSnap) => {
             const data = docSnap.data();
+            if (data?.partecipanti) {
+    setParticipants(data.partecipanti);
+
+    // 🧹 Auto-elimina la stanza se vuota e sei l'host
+    if (data.partecipanti.length === 0 && data.host === username) {
+      try {
+        await deleteDoc(roomDocRef);
+        console.log('✅ Stanza eliminata automaticamente perché vuota.');
+      } catch (error) {
+        console.error('❌ Errore durante la cancellazione della stanza:', error);
+      }
+    }
+  }
+
+
+
+
+
+
+
+
+
+
+
             if (data?.state) {
               setCurrentState(data.state as RoomState);
               setRoundImages(data.state.roundImages);
