@@ -24,6 +24,15 @@ type ImageItem = {
   name: string;
 };
 
+type RoomState = {
+  roundImages: ImageItem[];
+  currentPairIndex: number;
+  winners: ImageItem[];
+  finalWinner: ImageItem | null;
+  showFinal: boolean;
+  originalLength: number;
+};
+
 export default function Page() {
   const { id } = useParams();
   const searchParams = useSearchParams();
@@ -44,14 +53,11 @@ export default function Page() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [joined, setJoined] = useState(false);
   const [host, setHost] = useState(false);
-  const [currentState, setCurrentState] = useState<any>(null);
+  const [currentState, setCurrentState] = useState<RoomState | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-
-  
 
   const confettiLaunched = useRef(false);
 
-  // 🔐 Verifica autenticazione con Firebase
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
@@ -64,7 +70,6 @@ export default function Page() {
     return () => unsubscribe();
   }, [router]);
 
-  // Carica la classifica
   useEffect(() => {
     if (!authChecked) return;
 
@@ -83,7 +88,6 @@ export default function Page() {
     fetchData();
   }, [id, authChecked]);
 
-  // Unisciti alla stanza
   useEffect(() => {
     if (!authChecked || !username || joined) return;
 
@@ -120,7 +124,7 @@ export default function Page() {
           onSnapshot(roomDocRef, (docSnap) => {
             const data = docSnap.data();
             if (data?.state) {
-              setCurrentState(data.state);
+              setCurrentState(data.state as RoomState);
               setRoundImages(data.state.roundImages);
               setCurrentPairIndex(data.state.currentPairIndex);
               setWinners(data.state.winners);
@@ -162,7 +166,6 @@ export default function Page() {
     joinRoom();
   }, [authChecked, id, searchParams, joined, router, username]);
 
-  // Aggiorna partecipanti
   useEffect(() => {
     if (!roomId) return;
     const unsub = onSnapshot(doc(db, 'stanze', roomId), (docSnap) => {
