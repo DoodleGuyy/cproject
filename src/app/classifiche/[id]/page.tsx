@@ -7,7 +7,6 @@ import {
   getDoc,
   collection,
   addDoc,
-  serverTimestamp,
   updateDoc,
   arrayUnion,
   arrayRemove,
@@ -19,6 +18,8 @@ import { db, auth } from '@/lib/firebaseConfig';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { Home, Sun, Moon, ChevronDown, ChevronUp } from 'lucide-react';
+import { getDatabase, ref as rtdbRef, onValue, onDisconnect, set, serverTimestamp } from 'firebase/database';
+
 
 type ImageItem = {
   url: string;
@@ -115,6 +116,20 @@ export default function Page() {
           });
 
           setRoomId(roomFromUrl);
+          const dbRT = getDatabase();
+const connRef = rtdbRef(dbRT, '.info/connected');
+const presenceRef = rtdbRef(dbRT, `presence/${roomId}/${name}`);
+
+onValue(connRef, (snap) => {
+  if (snap.val() === true) {
+    onDisconnect(presenceRef).remove();
+    set(presenceRef, {
+      user: name,
+      joinedAt: serverTimestamp(),
+    });
+  }
+});
+
 
           const removeFromRoom = () => {
   if (roomDocRef) {
