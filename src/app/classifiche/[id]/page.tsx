@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   doc,
   getDoc,
@@ -18,14 +18,19 @@ import { db, auth } from '@/lib/firebaseConfig';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { Home, Sun, Moon, ChevronDown, ChevronUp } from 'lucide-react';
-import { getDatabase, ref as rtdbRef, onValue, onDisconnect, set, serverTimestamp } from 'firebase/database';
+import {
+  getDatabase,
+  ref as rtdbRef,
+  onValue,
+  onDisconnect,
+  set,
+  push,
+  serverTimestamp,
+} from 'firebase/database';
 
+// Tipi
 
-type ImageItem = {
-  url: string;
-  name: string;
-};
-
+type ImageItem = { url: string; name: string };
 type RoomState = {
   roundImages: ImageItem[];
   currentPairIndex: number;
@@ -40,141 +45,122 @@ export default function Page() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
+  // Stato locale
   const [roundImages, setRoundImages] = useState<ImageItem[]>([]);
   const [currentPairIndex, setCurrentPairIndex] = useState(0);
   const [winners, setWinners] = useState<ImageItem[]>([]);
   const [finalWinner, setFinalWinner] = useState<ImageItem | null>(null);
+  const [showFinal, setShowFinal] = useState(false);
   const [title, setTitle] = useState('');
   const [selectedImage, setSelectedImage] = useState<ImageItem | null>(null);
   const [disabled, setDisabled] = useState(false);
-  const [showFinal, setShowFinal] = useState(false);
   const [isDark, setIsDark] = useState(true);
   const [roomId, setRoomId] = useState<string | null>(null);
-  const [username, setUsername] = useState<string>('');
+  const [username, setUsername] = useState('');
   const [participants, setParticipants] = useState<string[]>([]);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [joined, setJoined] = useState(false);
   const [host, setHost] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [currentState, setCurrentState] = useState<RoomState | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-
   const confettiLaunched = useRef(false);
 
+  // Autenticazione
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (!user) {
-        router.push('/login');
-      } else {
-        setUsername(user.email ?? '');
-      }
+      if (!user) router.push('/login');
+      else setUsername(user.email ?? '');
       setAuthChecked(true);
     });
-    return () => unsubscribe();
+    return unsubscribe;
   }, [router]);
 
+  // Caricamento immagini e titolo
   useEffect(() => {
     if (!authChecked) return;
-
-    async function fetchData() {
+    (async () => {
       const ref = doc(db, 'classifiche', id as string);
       const snap = await getDoc(ref);
       if (snap.exists()) {
         const data = snap.data();
-        if (data && data.images) {
+        if (data.images) {
           const shuffled = [...data.images].sort(() => Math.random() - 0.5);
           setRoundImages(shuffled);
           setTitle(data.title);
         }
       }
-    }
-    fetchData();
+    })();
   }, [id, authChecked]);
 
+  // Funzione di pulizia partecipante
+  const removeFromRoom = useCallback(async () => {
+    if (roomId && username) {
+      const roomRef = doc(db, 'stanze', roomId);
+      try {
+        await updateDoc(roomRef, {
+          partecipanti: arrayRemove(username),
+        });
+      } catch (err) {
+        console.error('Errore rimozione partecipante:', err);
+      }
+    }
+  }, [roomId, username]);
+
+  // Join / creazione stanza
   useEffect(() => {
-    if (!authChecked || !username || joined) return;
+    if (!authChecked || !username) return;
 
-    async function joinRoom() {
-      setJoined(true);
+    let unsubSnapshot: (() => void) | null = null;
 
+    (async () => {
       const roomFromUrl = searchParams.get('room');
       const name = username;
 
       if (roomFromUrl) {
-        const roomDocRef = doc(db, 'stanze', roomFromUrl);
-        const snap = await getDoc(roomDocRef);
+        const roomRef = doc(db, 'stanze', roomFromUrl);
+        const snap = await getDoc(roomRef);
         if (snap.exists()) {
-          const data = snap.data();
-          if (!data?.host) {
-            await updateDoc(roomDocRef, { host: name });
-            setHost(true);
-          } else {
-            setHost(data.host === name);
-          }
+          const data = snap.data()!;
+          const isHost = !data.host;
+          if (isHost) await updateDoc(roomRef, { host: name });
+          setHost(isHost || data.host === name);
 
-          await updateDoc(roomDocRef, {
-            partecipanti: arrayUnion(`${name} (host)`),
+          // Aggiungo partecipante (solo nome)
+          await updateDoc(roomRef, { partecipanti: arrayUnion(name) });
+          setRoomId(roomFromUrl);
+
+          // Presence su RTDB
+          const dbRT = getDatabase();
+          const connRef = rtdbRef(dbRT, '.info/connected');
+          // Creiamo un nodo child con key generata (per evitare caratteri invalidi)
+          const presenceListRef = rtdbRef(dbRT, `presence/${roomFromUrl}`);
+          let newPresenceRef: any;
+          onValue(connRef, (snap) => {
+            if (snap.val() === true) {
+              // push genera una key sicura
+              newPresenceRef = push(presenceListRef);
+              onDisconnect(newPresenceRef).remove();
+              set(newPresenceRef, { user: name, joinedAt: serverTimestamp() });
+            }
           });
 
-          setRoomId(roomFromUrl);
-          const dbRT = getDatabase();
-const connRef = rtdbRef(dbRT, '.info/connected');
-const presenceRef = rtdbRef(dbRT, `presence/${roomId}/${name}`);
+          // Snapshot Firestore
+          unsubSnapshot = onSnapshot(roomRef, async (docSnap) => {
+            const data = docSnap.data()!;
+            setParticipants(data.partecipanti || []);
 
-onValue(connRef, (snap) => {
-  if (snap.val() === true) {
-    onDisconnect(presenceRef).remove();
-    set(presenceRef, {
-      user: name,
-      joinedAt: serverTimestamp(),
-    });
-  }
-});
+            // Se nessun partecipante left e sei host => cancella stanza
+            if ((data.partecipanti || []).length === 0 && data.host === name) {
+              try {
+                await deleteDoc(roomRef);
+                console.log('Stanza cancellata perché vuota');
+              } catch (e) {
+                console.error('Errore cancellazione stanza:', e);
+              }
+            }
 
-
-          const removeFromRoom = () => {
-  if (roomDocRef) {
-    updateDoc(roomDocRef, {
-      partecipanti: arrayRemove(name),
-    }).catch((err) => console.error('Errore rimozione partecipante:', err));
-  }
-};
-
-window.addEventListener('beforeunload', removeFromRoom);
-window.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') {
-    removeFromRoom();
-  }
-});
-
-
-          onSnapshot(roomDocRef, async (docSnap) => {
-            const data = docSnap.data();
-            if (data?.partecipanti) {
-    setParticipants(data.partecipanti);
-
-    // 🧹 Auto-elimina la stanza se vuota e sei l'host
-    if (data.partecipanti.length === 0 && data.host === username) {
-      try {
-        await deleteDoc(roomDocRef);
-        console.log('✅ Stanza eliminata automaticamente perché vuota.');
-      } catch (error) {
-        console.error('❌ Errore durante la cancellazione della stanza:', error);
-      }
-    }
-  }
-
-
-
-
-
-
-
-
-
-
-
-            if (data?.state) {
-              setCurrentState(data.state as RoomState);
+            // Stato gioco condiviso
+            if (data.state) {
+              setCurrentState(data.state);
               setRoundImages(data.state.roundImages);
               setCurrentPairIndex(data.state.currentPairIndex);
               setWinners(data.state.winners);
@@ -183,62 +169,72 @@ window.addEventListener('visibilitychange', () => {
             }
           });
 
+          // Event listener per pulizia
+          window.addEventListener('beforeunload', removeFromRoom);
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') removeFromRoom();
+          });
+
           return;
         }
       }
 
+      // Creazione nuova stanza
       const ref = doc(db, 'classifiche', id as string);
-      const snap = await getDoc(ref);
-      const data = snap.data();
-      if (data && data.images) {
-        const shuffled = [...data.images].sort(() => Math.random() - 0.5);
-        const newRoomRef = await addDoc(collection(db, 'stanze'), {
-          classificaId: id,
-          partecipanti: [`${name} (host)`],
-          createdAt: serverTimestamp(),
-          host: name,
-          state: {
-            roundImages: shuffled,
-            currentPairIndex: 0,
-            winners: [],
-            finalWinner: null,
-            showFinal: false,
-            originalLength: shuffled.length,
-          },
-        });
-        setRoomId(newRoomRef.id);
-        setHost(true);
-        setRoundImages(shuffled);
-        router.replace(`?room=${newRoomRef.id}`);
+      const snap2 = await getDoc(ref);
+      if (snap2.exists()) {
+        const data2 = snap2.data()!;
+        if (data2.images) {
+          const shuffled = [...data2.images].sort(() => Math.random() - 0.5);
+          const newRoomRef = await addDoc(collection(db, 'stanze'), {
+            classificaId: id,
+            partecipanti: [name],
+            createdAt: serverTimestamp(),
+            host: name,
+            state: {
+              roundImages: shuffled,
+              currentPairIndex: 0,
+              winners: [],
+              finalWinner: null,
+              showFinal: false,
+              originalLength: shuffled.length,
+            },
+          });
+          setRoomId(newRoomRef.id);
+          setHost(true);
+          setRoundImages(shuffled);
+          router.replace(`?room=${newRoomRef.id}`);
+        }
       }
-    }
+    })();
 
-    joinRoom();
-  }, [authChecked, id, searchParams, joined, router, username]);
+    return () => {
+      if (unsubSnapshot) unsubSnapshot();
+      window.removeEventListener('beforeunload', removeFromRoom);
+    };
+  }, [authChecked, username, searchParams, id, removeFromRoom, router]);
 
+  // Listener partecipanti solo per UI
   useEffect(() => {
     if (!roomId) return;
     const unsub = onSnapshot(doc(db, 'stanze', roomId), (docSnap) => {
       const data = docSnap.data();
-      if (data?.partecipanti) {
-        setParticipants(data.partecipanti);
-      }
+      setParticipants(data?.partecipanti || []);
     });
     return () => unsub();
   }, [roomId]);
 
+  // Logica del torneo
   const currentPair = roundImages.slice(currentPairIndex, currentPairIndex + 2);
-  const originalLength = currentState?.originalLength || roundImages.length || 1;
-  const totalRounds = Math.ceil(Math.log2(originalLength));
-  const currentRoundLength = roundImages.length;
-  const currentRound = totalRounds - Math.floor(Math.log2(currentRoundLength)) + 1;
+  const originalLength = currentState?.originalLength || roundImages.length;
+  const totalMatches = (roundImages.length / 2) | 0;
+  const currentRound = Math.ceil(Math.log2(originalLength)) - Math.floor(Math.log2(roundImages.length)) + 1;
   const currentMatch = Math.floor(currentPairIndex / 2) + 1;
-  const totalMatches = currentRoundLength / 2;
 
   const handleVote = async (winner: ImageItem) => {
     if (!host || disabled) return;
-    setSelectedImage(winner);
     setDisabled(true);
+    setSelectedImage(winner);
 
     const isLastPair = currentPairIndex + 2 >= roundImages.length;
     const newWinners = [...winners, winner];
@@ -253,16 +249,15 @@ window.addEventListener('visibilitychange', () => {
         setShowFinal(true);
         if (!confettiLaunched.current) {
           confettiLaunched.current = true;
-          confetti({ particleCount: 100, spread: 120, origin: { y: 0.5 }, colors: ['#eb5514', '#ffffff'] });
+          confetti({ particleCount: 100, spread: 120, origin: { y: 0.5 } });
         }
       } else {
-        setRoundImages(isLastPair ? newWinners : roundImages);
+        setRoundImages(nextRoundImages);
         setWinners(nextWinners);
         setCurrentPairIndex(nextPairIndex);
       }
-
-      setSelectedImage(null);
       setDisabled(false);
+      setSelectedImage(null);
 
       if (roomId) {
         await updateDoc(doc(db, 'stanze', roomId), {
@@ -279,10 +274,9 @@ window.addEventListener('visibilitychange', () => {
     }, 400);
   };
 
-  const inviteLink =
-    typeof window !== 'undefined' && roomId
-      ? `${window.location.origin}/classifiche/${id}?room=${roomId}`
-      : '';
+  const inviteLink = roomId
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/classifiche/${id}?room=${roomId}`
+    : '';
 
   return (
     <div style={{ zoom: 1.5 }}>
@@ -322,11 +316,13 @@ window.addEventListener('visibilitychange', () => {
                     className="w-full mt-1 px-2 py-1 rounded text-xs bg-gray-100 text-black"
                   />
                 </p>
-                <p className="text-sm mb-2">👤 Tu sei: {username}</p>
-                <p className="mb-1 text-sm">👥 Partecipanti:</p>
+                <p className="text-sm mb-2">👤 Tu sei: {username} {host ? '(host)' : ''}</p>
+                <p className="mb-1 text-sm">👥Partecipanti:</p>
                 <ul className="list-disc ml-5 text-sm">
                   {participants.map((user, i) => (
-                    <li key={i}>{user}</li>
+                    <li key={i}>
+                      {user} {user === username && host ? '(host)' : ''}
+                    </li>
                   ))}
                 </ul>
               </div>
@@ -334,6 +330,7 @@ window.addEventListener('visibilitychange', () => {
           </div>
         </div>
 
+        {/* Corpo del torneo e risultati, uguale a prima */}
         {showFinal && finalWinner ? (
           <div className="text-center p-8">
             <motion.h1
@@ -364,7 +361,7 @@ window.addEventListener('visibilitychange', () => {
             </p>
 
             <div className="flex justify-center items-center gap-6">
-              <AnimatePresence mode="wait">
+              <AnimatePresence initial={false} mode="wait">
                 <motion.div
                   key={currentPair[0].url}
                   initial={{ x: -300, opacity: 0 }}
