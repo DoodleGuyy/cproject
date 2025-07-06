@@ -21,14 +21,21 @@ export default function RegisterPage() {
     try {
       await createUserWithEmailAndPassword(auth, email, password);
       router.push('/');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Errore durante la registrazione:', error);
-      if (error.code === 'auth/email-already-in-use') {
-        setErrorMessage('Questa email è già in uso.');
-      } else if (error.code === 'auth/weak-password') {
-        setErrorMessage('La password deve contenere almeno 6 caratteri.');
+
+      if (typeof error === 'object' && error !== null && 'code' in error) {
+        const err = error as { code: string };
+
+        if (err.code === 'auth/email-already-in-use') {
+          setErrorMessage('Questa email è già in uso.');
+        } else if (err.code === 'auth/weak-password') {
+          setErrorMessage('La password deve contenere almeno 6 caratteri.');
+        } else {
+          setErrorMessage('Errore durante la registrazione.');
+        }
       } else {
-        setErrorMessage('Errore durante la registrazione.');
+        setErrorMessage('Errore sconosciuto.');
       }
     }
   };
