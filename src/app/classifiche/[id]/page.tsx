@@ -46,7 +46,6 @@ export default function Page() {
   const [host, setHost] = useState(false);
   const [currentState, setCurrentState] = useState<any>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
 
   
 
